@@ -1,13 +1,13 @@
 { ***************************************************************************
 
-  Copyright (c) 2015-2019 Kike Pérez
+  Copyright (c) 2015-2020 Kike Pérez
 
   Unit        : Quick.YAML.Serializer
   Description : YAML Serializer
   Author      : Kike Pérez
   Version     : 1.0
   Created     : 12/04/2019
-  Modified    : 10/12/2019
+  Modified    : 07/04/20120
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -49,6 +49,7 @@ uses
   {$ENDIF}
   DateUtils,
   Quick.Commons,
+  Quick.RTTI.Utils,
   Quick.YAML,
   Quick.Value,
   Quick.Arrays;
@@ -512,6 +513,7 @@ begin
     if (TObjectList<TObject>(aObject) <> nil) and (rvalue.IsArray) then
     begin
       TObjectList<TObject>(aObject).Clear;
+      TObjectList<TObject>(aObject).Capacity := rvalue.GetArrayLength;
       for i := 0 to rvalue.GetArrayLength - 1 do
       begin
         TObjectList<TObject>(aObject).Add(rvalue.GetArrayElement(i).AsObject);
@@ -637,11 +639,11 @@ begin
               Yaml.Free;
             end;
           end;
-        {$ENDIF}
         tkSet :
           begin
             rValue := DeserializeType(aObject,aProperty.PropertyType.TypeKind,aProperty.GetValue(aObject).TypeInfo,member.ToYaml)
           end
+        {$ENDIF}
       else
         begin
           {$IFNDEF FPC}
@@ -695,11 +697,11 @@ begin
         begin
           if aTypeInfo = TypeInfo(TDateTime) then
           begin
-            if value <> 'null' then Result := JsonDateToDateTime(value);
+            if CompareText(value,'null') <> 0 then Result := JsonDateToDateTime(value);
           end
           else if aTypeInfo = TypeInfo(TDate) then
           begin
-            Result := StrToDate(value);
+            if CompareText(value,'null') <> 0 then Result := StrToDate(value);
           end
           else if aTypeInfo = TypeInfo(TTime) then
           begin
@@ -781,11 +783,11 @@ begin
         begin
           if propinfo.PropType = TypeInfo(TDateTime) then
           begin
-            Result := JsonDateToDateTime(value);
+            if CompareText(value,'null') <> 0  then Result := JsonDateToDateTime(value);
           end
           else if propinfo.PropType = TypeInfo(TDate) then
           begin
-            Result := StrToDate(value);
+            if CompareText(value,'null') <> 0 then Result := StrToDate(value);
           end
           else if propinfo.PropType = TypeInfo(TTime) then
           begin
@@ -1033,7 +1035,7 @@ begin
     rType := ctx.GetType(aObject.ClassInfo);
     try
       //s := rType.ToString;
-      for rProp in rType.GetProperties do
+      for rProp in TRTTI.GetProperties(rType,roFirstBase) do
       begin
         ExcludeSerialize := False;
         propertyname := rProp.Name;
@@ -1179,11 +1181,11 @@ begin
         begin
           if aValue.TypeInfo = TypeInfo(TDateTime) then
           begin
-            Result.Value := TYamlString.Create(DateTimeToJsonDate(aValue.AsExtended));
+            if aValue.AsExtended <> 0.0 then Result.Value := TYamlString.Create(DateTimeToJsonDate(aValue.AsExtended));
           end
           else if aValue.TypeInfo = TypeInfo(TDate) then
           begin
-            Result.Value := TYamlString.Create(DateToStr(aValue.AsExtended));
+            if aValue.AsExtended <> 0.0 then Result.Value := TYamlString.Create(DateToStr(aValue.AsExtended));
           end
           else if aValue.TypeInfo = TypeInfo(TTime) then
           begin
@@ -1292,11 +1294,11 @@ begin
         begin
           if aValue.TypeInfo = TypeInfo(TDateTime) then
           begin
-            Result.Value := TYamlString.Create(DateTimeToJsonDate(aValue.AsExtended));
+            if aValue.AsExtended <> 0.0 then Result.Value := TYamlString.Create(DateTimeToJsonDate(aValue.AsExtended));
           end
           else if aValue.TypeInfo = TypeInfo(TDate) then
           begin
-            Result.Value := TYamlString.Create(DateToStr(aValue.AsExtended));
+            if aValue.AsExtended <> 0.0 then Result.Value := TYamlString.Create(DateToStr(aValue.AsExtended));
           end
           else if aValue.TypeInfo = TypeInfo(TTime) then
           begin
@@ -1408,11 +1410,11 @@ begin
         begin
           if propinfo.PropType = TypeInfo(TDateTime) then
           begin
-            Result.Value := TYamlString.Create(DateTimeToJsonDate(GetFloatProp(aObject,aPropertyName)));
+            if aValue.AsExtended <> 0.0 then Result.Value := TYamlString.Create(DateTimeToJsonDate(GetFloatProp(aObject,aPropertyName)));
           end
           else if propinfo.PropType = TypeInfo(TDate) then
           begin
-            Result.Value := TYamlString.Create(DateToStr(GetFloatProp(aObject,aPropertyName)));
+            if aValue.AsExtended <> 0.0 then Result.Value := TYamlString.Create(DateToStr(GetFloatProp(aObject,aPropertyName)));
           end
           else if propinfo.PropType = TypeInfo(TTime) then
           begin
@@ -1500,9 +1502,10 @@ function TYamlSerializer.YamlToObject(aType: TClass; const aYaml: string): TObje
 var
   Yaml: TYamlObject;
 begin
+  Result := nil;
   Yaml := TYamlObject.ParseYamlValue(aYaml) as TYamlObject;
   try
-    fRTTIYaml.DeserializeClass(aType,Yaml);
+    Result := fRTTIYaml.DeserializeClass(aType,Yaml);
   finally
     Yaml.Free;
   end;
@@ -1518,6 +1521,7 @@ function TYamlSerializer.YamlToObject(aObject: TObject; const aYaml: string): TO
 var
   Yaml: TYamlObject;
 begin
+  Result := aObject;
   Yaml := TYamlObject(TYamlObject.ParseYamlValue(aYaml));
   try
     fRTTIYaml.DeserializeObject(aObject,Yaml);

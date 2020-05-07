@@ -6,6 +6,7 @@ program LinqList;
 
 uses
   System.SysUtils,
+  System.Generics.Collections,
   Quick.Commons,
   Quick.Console,
   Quick.Chrono,
@@ -110,8 +111,8 @@ begin
       //if (users[i].Name = 'Anus') or (users[i].SurName = 'Smith') then
       if users[i].Name = 'Peter' then
       begin
-        crono.Stop;
         user := users[i];
+        crono.Stop;
         Break;
       end;
     end;
@@ -125,6 +126,17 @@ begin
     user := TLinq<TUser>.From(users2).Where('Name = ?',['Peter']).SelectFirst;
     crono.Stop;
     if user <> nil then cout('Found by Linq: %s %s in %s',[user.Name,user.SurName,crono.ElapsedTime],etSuccess)
+      else cout('Not found by Linq! (%s)',[crono.ElapsedTime],etError);
+
+    //test search by Linq iteration (predicate)
+    crono.Start;
+    //user := TLinq.From<TUser>(users2).Where('(Name = ?) OR (SurName = ?)',['Anus','Smith']).OrderBy('Name').SelectFirst;
+    user := TLinq<TUser>.From(users2).Where(function(aUser : TUser) : Boolean
+      begin
+        Result := aUser.Name = 'Peter';
+      end).SelectFirst;
+    crono.Stop;
+    if user <> nil then cout('Found by Linq (predicate): %s %s in %s',[user.Name,user.SurName,crono.ElapsedTime],etSuccess)
       else cout('Not found by Linq! (%s)',[crono.ElapsedTime],etError);
 
     //test search by embeded iteration
@@ -158,7 +170,7 @@ begin
     user := nil;
     n := 0;
     cout('Found by Linq:',etInfo);
-    //TLinq<TUser>.From(users2).Where('SurName Like ?',['p%']).Delete;
+    //TLinq<TUser>.From(users2).Where('Name Like ?',['p%']).Delete;
 
     TLinq<TUser>.From(users2).Where('Name = ?',['Peter']).Update(['Name'],['Poter']);
 
@@ -173,7 +185,7 @@ begin
                                          .Select do
     begin
       Inc(n);
-      cout('%d. %s %s',[n,user.Name,user.SurName],etSuccess);
+      cout('Login.Username: %d. %s %s',[n,user.Name,user.SurName],etSuccess);
     end;
     if user = nil then cout('Not found by Linq!',etError);
 

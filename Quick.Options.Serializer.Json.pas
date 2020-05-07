@@ -7,7 +7,7 @@
   Author      : Kike Pérez
   Version     : 1.0
   Created     : 18/10/2019
-  Modified    : 07/02/2020
+  Modified    : 15/04/2020
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -53,6 +53,7 @@ type
     constructor Create;
     destructor Destroy; override;
     function Load(const aFilename : string; aSections : TSectionList; aFailOnSectionNotExists : Boolean) : Boolean; override;
+    function LoadSection(const aFilename : string; aSections : TSectionList; aOptions: TOptions) : Boolean; override;
     procedure Save(const aFilename : string; aSections : TSectionList); override;
     function GetFileSectionNames(const aFilename : string; out oSections : TArray<string>) : Boolean; override;
   end;
@@ -75,7 +76,6 @@ end;
 function TJsonOptionsSerializer.GetFileSectionNames(const aFilename: string; out oSections: TArray<string>): Boolean;
 var
   json : TJsonObject;
-  jpair : TJSONPair;
   i : Integer;
 begin
   Result := False;
@@ -103,6 +103,7 @@ begin
   begin
     fileoptions := TFile.ReadAllText(aFilename,TEncoding.UTF8);
     aJsonObj := TJsonObject.ParseJSONValue(fileoptions) as TJsonObject;
+    if aJsonObj = nil then raise EOptionLoadError.CreateFmt('Config file "%s" is damaged or not well-formed Json format!',[ExtractFileName(aFilename)]);
   end;
   Result := aJsonObj <> nil;
 end;
@@ -110,13 +111,14 @@ end;
 function TJsonOptionsSerializer.Load(const aFilename : string; aSections : TSectionList; aFailOnSectionNotExists : Boolean) : Boolean;
 var
   option : TOptions;
-  fileoptions : string;
   json : TJsonObject;
   jpair : TJSONPair;
+  found : Integer;
 begin
   Result := False;
   if ParseFile(aFilename,json) then
   begin
+    found := 0;
     try
       for option in aSections do
       begin
@@ -124,7 +126,12 @@ begin
         if jpair = nil then
         begin
           if aFailOnSectionNotExists then raise Exception.CreateFmt('Config section "%s" not found',[option.Name])
-            else Continue;
+          else
+          begin
+            //count as found if hidden
+            if option.HideOptions then Inc(found);
+            Continue;
+          end;
         end;
         if jpair.JsonValue <> nil then
         begin
@@ -132,9 +139,36 @@ begin
           fSerializer.DeserializeObject(option,jpair.JsonValue as TJSONObject);
           //validate loaded configuration
           option.ValidateOptions;
+          Inc(found);
         end;
       end;
-      Result := True;
+    finally
+      json.Free;
+    end;
+    //returns true if all sections located into file
+    Result := found = aSections.Count;
+  end;
+end;
+
+function TJsonOptionsSerializer.LoadSection(const aFilename : string; aSections : TSectionList; aOptions: TOptions) : Boolean;
+var
+  json : TJsonObject;
+  jpair : TJSONPair;
+begin
+  Result := False;
+  //read option file
+  if ParseFile(aFilename,json) then
+  begin
+    try
+      jpair := fSerializer.GetJsonPairByName(json,aOptions.Name);
+      if (jpair <> nil) and (jpair.JsonValue <> nil) then
+      begin
+        //deserialize option
+        fSerializer.DeserializeObject(aOptions,jpair.JsonValue as TJSONObject);
+        //validate loaded configuration
+        aOptions.ValidateOptions;
+        Result := True;
+      end;
     finally
       json.Free;
     end;
@@ -157,7 +191,7 @@ begin
         //validate configuration before save
         option.ValidateOptions;
         //serialize option
-        jpair := fSerializer.Serialize(option.Name,option);
+        jpair := TJSONPair.Create(option.Name,fSerializer.SerializeObject(option));
         json.AddPair(jpair);
       end;
     end;

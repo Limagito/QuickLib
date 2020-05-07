@@ -62,9 +62,11 @@ type
 
   TGroup = class
   private
+    fGlobalID: TGUID;
     fId : TID;
     fGType : TGroupType;
   published
+    property GlobalID: TGUID read fGlobalID write fGlobalID;
     property Id : TID read fId write fId;
     property GType : TGroupType read fGType write fGType;
   end;
@@ -179,8 +181,6 @@ implementation
 {$R *.fmx}
 
 procedure TForm1.btnFromJsonClick(Sender: TObject);
-var
-  s : string;
 begin
   if User2 <> nil then User2.Free;
   User2 := TUser.Create;
@@ -212,6 +212,7 @@ var
   lastcon : TConnectionInfo;
   group : TGroup;
   department : TDepartment;
+  guid: TGUID;
 begin
   serializer := TJsonSerializer.Create(TSerializeLevel.slPublishedProperty);
   user := TUser.Create;
@@ -245,10 +246,14 @@ begin
   group := TGroup.Create;
   group.Id := 1;
   group.GType := gtInternal;
+  CreateGUID(guid);
+  group.GlobalID:=guid;
   user.Groups.Add(group);
   group := TGroup.Create;
   group.Id := 2;
   group.GType := gtExternal;
+  CreateGUID(guid);
+  group.GlobalID:=guid;
   user.Groups.Add(group);
  end;
 

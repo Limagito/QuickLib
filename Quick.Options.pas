@@ -7,7 +7,7 @@
   Author      : Kike Pérez
   Version     : 1.0
   Created     : 18/10/2019
-  Modified    : 07/02/2020
+  Modified    : 27/02/2020
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -130,6 +130,7 @@ type
     function GetOptions(aOptionClass : TOptionsClass): TOptions;
     function GetSection(aOptionsSection : TOptionsClass; var vOptions : TOptions) : Boolean; overload;
     procedure AddOption(aOption : TOptions);
+    function ExistsSection(aOption : TOptionsClass; const aSectionName : string = '') : Boolean;
   end;
 
   TSectionList = TObjectList<TOptions>;
@@ -137,6 +138,7 @@ type
   IOptionsSerializer = interface
   ['{7DECE203-4AAE-4C9D-86C8-B3D583DF7C8B}']
     function Load(const aFilename : string; aSections : TSectionList; aFailOnSectionNotExists : Boolean) : Boolean;
+    function LoadSection(const aFilename : string; aSections : TSectionList; aOptions: TOptions) : Boolean;
     procedure Save(const aFilename : string; aSections : TSectionList);
     function GetFileSectionNames(const aFilename : string; out oSections : TArray<string>) : Boolean;
   end;
@@ -144,6 +146,7 @@ type
   TOptionsSerializer = class(TInterfacedObject,IOptionsSerializer)
   public
     function Load(const aFilename : string; aSections : TSectionList; aFailOnSectionNotExists : Boolean) : Boolean; virtual; abstract;
+    function LoadSection(const aFilename : string; aSections : TSectionList; aOptions: TOptions) : Boolean; virtual; abstract;
     procedure Save(const aFilename : string; aSections : TSectionList); virtual; abstract;
     function GetFileSectionNames(const aFilename : string; out oSections : TArray<string>) : Boolean; virtual; abstract;
   end;
@@ -183,6 +186,8 @@ type
     property FileName : string read fFilename write fFilename;
     property ReloadIfFileChanged : Boolean read fReloadIfFileChanged write SetReloadIfFileChanged;
     property IsLoaded : Boolean read fLoaded;
+    function ExistsSection(aOption : TOptionsClass; const aSectionName : string = '') : Boolean; overload;
+    function ExistsSection<T : TOptions>(const aSectionName : string = '') : Boolean; overload;
     property OnFileModified : TFileModifiedEvent read fOnFileModified write fOnFileModified;
     property OnConfigLoaded : TLoadConfigEvent read fOnConfigLoaded write fOnConfigLoaded;
     property OnConfigReloaded : TLoadConfigEvent read fOnConfigReloaded write fOnConfigReloaded;
@@ -196,6 +201,7 @@ type
     function GetFileSectionNames(out oSections : TArray<string>) : Boolean;
     function Count : Integer;
     procedure Load(aFailOnSectionNotExists : Boolean = False);
+    procedure LoadSection(aOptions : TOptions);
     procedure Save;
   end;
 
@@ -253,6 +259,25 @@ begin
   end;
   fSections.Free;
   inherited;
+end;
+
+function TOptionsContainer.ExistsSection(aOption: TOptionsClass;const aSectionName: string): Boolean;
+var
+  option : TOptions;
+begin
+  Result := False;
+  for option in fSections do
+  begin
+    if CompareText(option.ClassName,aOption.ClassName) = 0 then
+    begin
+      if (not aSectionName.IsEmpty) and (CompareText(option.Name,aSectionName) = 0) then Exit(True);
+    end;
+  end;
+end;
+
+function TOptionsContainer.ExistsSection<T>(const aSectionName: string): Boolean;
+begin
+  Result := GetSection<T>(aSectionName) <> nil;
 end;
 
 procedure TOptionsContainer.FileModifiedNotify(MonitorNotify: TMonitorNotify);
@@ -389,6 +414,14 @@ begin
   end;
 end;
 
+procedure TOptionsContainer.LoadSection(aOptions : TOptions);
+begin
+  if FileExists(fFilename) then
+  begin
+    if not fSerializer.LoadSection(fFilename,fSections,aOptions) then Save;
+  end;
+end;
+
 procedure TOptionsContainer.Save;
 var
   laststate : Boolean;
@@ -403,6 +436,7 @@ begin
       fSerializer.Save(fFilename,fSections);
     finally
       //set last state
+      Sleep(0);
       fFileMonitor.Enabled := laststate;
     end;
   end
@@ -472,33 +506,28 @@ var
   attrib : TCustomAttribute;
   rvalue : TValue;
 begin
-  ctx := TRttiContext.Create;
-  try
-    rtype := ctx.GetType(aObj.ClassInfo);
-    for rprop in rtype.GetProperties do
+  rtype := ctx.GetType(aObj.ClassInfo);
+  for rprop in rtype.GetProperties do
+  begin
+    //check only published properties
+    if rprop.Visibility = TMemberVisibility.mvPublished then
     begin
-      //check only published properties
-      if rprop.Visibility = TMemberVisibility.mvPublished then
+      //check validation option attributes
+      for attrib in rprop.GetAttributes do
       begin
-        //check validation option attributes
-        for attrib in rprop.GetAttributes do
-        begin
-          if attrib is Required  then ValidateRequired(aObj,rprop)
-          else if attrib is StringLength then ValidateStringLength(aObj,rprop,StringLength(attrib))
-          else if attrib is Range then ValidateRange(aObj,rprop,Range(attrib));
-        end;
-        rvalue := rprop.GetValue(aObj);
-        if not rvalue.IsEmpty then
-        begin
-          case rvalue.Kind of
-            tkClass : ValidateObject(rvalue.AsObject);
-            tkDynArray : ValidateArray(rvalue);
-          end;
+        if attrib is Required  then ValidateRequired(aObj,rprop)
+        else if attrib is StringLength then ValidateStringLength(aObj,rprop,StringLength(attrib))
+        else if attrib is Range then ValidateRange(aObj,rprop,Range(attrib));
+      end;
+      rvalue := rprop.GetValue(aObj);
+      if not rvalue.IsEmpty then
+      begin
+        case rvalue.Kind of
+          tkClass : ValidateObject(rvalue.AsObject);
+          tkDynArray : ValidateArray(rvalue);
         end;
       end;
     end;
-  finally
-    ctx.Free;
   end;
 end;
 
@@ -521,22 +550,17 @@ var
   itvalue : TValue;
   i : Integer;
 begin
-  ctx := TRttiContext.Create;
-  try
-    rDynArray := ctx.GetType(aValue.TypeInfo) as TRTTIDynamicArrayType;
-    for i := 0 to aValue.GetArrayLength - 1 do
+  rDynArray := ctx.GetType(aValue.TypeInfo) as TRTTIDynamicArrayType;
+  for i := 0 to aValue.GetArrayLength - 1 do
+  begin
+    TValue.Make(PPByte(aValue.GetReferenceToRawData)^ + rDynArray.ElementType.TypeSize * i, rDynArray.ElementType.Handle,itvalue);
+    if not itvalue.IsEmpty then
     begin
-      TValue.Make(PPByte(aValue.GetReferenceToRawData)^ + rDynArray.ElementType.TypeSize * i, rDynArray.ElementType.Handle,itvalue);
-      if not itvalue.IsEmpty then
-      begin
-        case itvalue.Kind of
-          tkClass : ValidateObject(itvalue.AsObject);
-          tkDynArray : ValidateArray(itvalue);
-        end;
+      case itvalue.Kind of
+        tkClass : ValidateObject(itvalue.AsObject);
+        tkDynArray : ValidateArray(itvalue);
       end;
     end;
-  finally
-    ctx.Free;
   end;
 end;
 

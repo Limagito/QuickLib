@@ -7,7 +7,7 @@
   Author      : Kike Pérez
   Version     : 1.0
   Created     : 18/10/2019
-  Modified    : 07/02/2020
+  Modified    : 05/04/2020
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -52,6 +52,7 @@ type
     constructor Create;
     destructor Destroy; override;
     function Load(const aFilename : string; aSections : TSectionList; aFailOnSectionNotExists : Boolean) : Boolean; override;
+    function LoadSection(const aFilename : string; aSections : TSectionList; aOptions: TOptions) : Boolean; override;
     procedure Save(const aFilename : string; aSections : TSectionList); override;
     function GetFileSectionNames(const aFilename : string; out oSections : TArray<string>) : Boolean; override;
   end;
@@ -74,7 +75,6 @@ end;
 function TYamlOptionsSerializer.GetFileSectionNames(const aFilename : string; out oSections : TArray<string>) : Boolean;
 var
   yaml : TYamlObject;
-  ypair : TYamlPair;
   i : Integer;
 begin
   Result := False;
@@ -102,6 +102,7 @@ begin
   begin
     fileoptions := TFile.ReadAllText(aFilename,TEncoding.UTF8);
     aYamlObj := TYamlObject.ParseYAMLValue(fileoptions) as TYamlObject;
+    if aYamlObj = nil then raise EOptionLoadError.CreateFmt('Config file "%s" is damaged or not well-formed Yaml format!',[ExtractFileName(aFilename)]);
   end;
   Result := aYamlObj <> nil;
 end;
@@ -109,7 +110,48 @@ end;
 function TYamlOptionsSerializer.Load(const aFilename : string; aSections : TSectionList; aFailOnSectionNotExists : Boolean) : Boolean;
 var
   option : TOptions;
-  fileoptions : string;
+  yaml : TYamlObject;
+  ypair : TYamlPair;
+  found : Integer;
+begin
+  Result := False;
+  //read option file
+  if ParseFile(aFilename,yaml) then
+  begin
+    found := 0;
+    try
+      for option in aSections do
+      begin
+        ypair := fSerializer.GetYamlPairByName(yaml,option.Name);
+        if ypair = nil then
+        begin
+          if aFailOnSectionNotExists then raise Exception.CreateFmt('Config section "%s" not found',[option.Name])
+          else
+          begin
+            //count as found if hidden
+            if option.HideOptions then Inc(found);
+            Continue;
+          end;
+        end;
+        if ypair.Value <> nil then
+        begin
+          //deserialize option
+          fSerializer.DeserializeObject(option,ypair.Value as TYamlObject);
+          //validate loaded configuration
+          option.ValidateOptions;
+          Inc(found);
+        end;
+      end;
+    finally
+      yaml.Free;
+    end;
+    //returns true if all sections located into file
+    Result := found = aSections.Count;
+  end;
+end;
+
+function TYamlOptionsSerializer.LoadSection(const aFilename : string; aSections : TSectionList; aOptions: TOptions) : Boolean;
+var
   yaml : TYamlObject;
   ypair : TYamlPair;
 begin
@@ -118,22 +160,15 @@ begin
   if ParseFile(aFilename,yaml) then
   begin
     try
-      for option in aSections do
+      ypair := fSerializer.GetYamlPairByName(yaml,aOptions.Name);
+      if (ypair <> nil) and (ypair.Value <> nil) then
       begin
-        ypair := fSerializer.GetYamlPairByName(yaml,option.Name);
-        if ypair = nil then
-        begin
-          if aFailOnSectionNotExists then raise Exception.CreateFmt('Config section "%s" not found',[option.Name])
-            else Continue;
-        end;
-        if ypair.Value <> nil then
-        begin
-          //deserialize option
-          fSerializer.DeserializeObject(option,ypair.Value as TYamlObject);
-          //validate loaded configuration
-          option.ValidateOptions;
-        end;
-      end;
+        //deserialize option
+        fSerializer.DeserializeObject(aOptions,ypair.Value as TYamlObject);
+        //validate loaded configuration
+        aOptions.ValidateOptions;
+        Result := True;
+      end
     finally
       yaml.Free;
     end;

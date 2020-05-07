@@ -66,7 +66,7 @@ type
     fValue : string;
     fIsNull : Boolean;
   protected
-    function IsNull : Boolean; virtual;
+    function IsNull : Boolean; override;
   public
     constructor Create; overload;
     constructor Create(const aValue : string); overload;
@@ -80,7 +80,7 @@ type
     fValue : Integer;
     fIsNull : Boolean;
   protected
-    function IsNull : Boolean; virtual;
+    function IsNull : Boolean; override;
   public
     constructor Create; overload;
     constructor Create(const aValue : Integer); overload;
@@ -94,7 +94,7 @@ type
     fValue : Double;
     fIsNull : Boolean;
   protected
-    function IsNull : Boolean; virtual;
+    function IsNull : Boolean; override;
   public
     constructor Create; overload;
     constructor Create(const aValue : Double); overload;
@@ -108,7 +108,7 @@ type
     fValue : Boolean;
     fIsNull : Boolean;
   protected
-    function IsNull : Boolean; virtual;
+    function IsNull : Boolean; override;
   public
     constructor Create; overload;
     constructor Create(const aValue : Boolean); overload;
@@ -602,12 +602,13 @@ begin
       if member = nil then continue;
 
       yvalue := member.Value;
-      if yvalue.IsScalar then
+      if (yvalue.IsScalar) or (yvalue is TYamlNull) then
       begin
         if yvalue is TYamlComment then yaml.Writeln(Format('#%s%s',[indent,TYamlComment(member.Value).AsString]))
         else
         begin
-          scalar := member.Value.Value.AsString;
+          if yvalue is TYamlNull then scalar := 'null'
+            else scalar := member.Value.Value.AsString;
           if scalar.IsEmpty then scalar := '""';
           yaml.Writeln(Format('%s%s: %s',[indent,member.Name,scalar]));
           if (i < fMembers.Count - 1) and (fMembers[i+1].Value is TYamlComment) then yaml.Writeln('');

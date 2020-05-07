@@ -58,3 +58,9 @@ release/
 
 *.lps
 bin/
+*.res
+*.tmp
+bin
+*.xml
+*.or
+*.or

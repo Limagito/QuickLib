@@ -1,13 +1,13 @@
 ﻿{ ***************************************************************************
 
-  Copyright (c) 2016-2019 Kike Pérez
+  Copyright (c) 2016-2020 Kike Pérez
 
   Unit        : Quick.Value
   Description : Autofree value record
   Author      : Kike Pérez
   Version     : 1.5
   Created     : 07/01/2019
-  Modified    : 27/08/2019
+  Modified    : 20/04/2020
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -238,7 +238,15 @@ type
     procedure SetAsInterface(const Value: IInterface);
   public
     constructor Create(const Value: TVarRec);
+    {$IFNDEF FPC}
+    property Data : IInterface read fDataIntf;
+    {$ELSE}
+    property Data : TValueData read fDataIntf;
+    {$ENDIF}
     property DataType : TValueDataType read fDataType;
+    {$IFNDEF FPC}
+    procedure SetAsCustom(aData : IInterface; aType : TValueDataType);
+    {$ENDIF}
     property AsString : string read CastToString write SetAsString;
     {$IFDEF MSWINDOWS}
     property AsAnsiString : AnsiString read CastToAnsiString write SetAsAnsiString;
@@ -267,6 +275,7 @@ type
     function  IsObject : Boolean; inline;
     function  IsPointer : Boolean; inline;
     function  IsVariant : Boolean; inline;
+    function IsArray : Boolean; inline;
     function IsRealInteger : Boolean;
     function IsRealExtended : Boolean;
     procedure Clear; inline;
@@ -872,6 +881,11 @@ begin
   Result := a.AsExtended <= b;
 end;
 
+function TFlexValue.IsArray: Boolean;
+begin
+  Result := fDataType = dtArray;
+end;
+
 function TFlexValue.IsBoolean: Boolean;
 begin
   Result := fDataType = dtBoolean;
@@ -966,6 +980,14 @@ begin
   fDataType := TValueDataType.dtClass;
 end;
 
+{$IFNDEF FPC}
+procedure TFlexValue.SetAsCustom(aData: IInterface; aType: TValueDataType);
+begin
+  fDataIntf := aData;
+  fDataType := aType;
+end;
+{$ENDIF}
+
 procedure TFlexValue.SetAsDateTime(const Value: TDateTime);
 begin
   Clear;
@@ -1036,6 +1058,10 @@ begin
 end;
 
 procedure TFlexValue.SetAsVariant(const Value: Variant);
+var
+  i : Int64;
+  b : Boolean;
+  f : Extended;
 begin
   Clear;
   case VarType(Value) and varTypeMask of
@@ -1054,9 +1080,9 @@ begin
     varDate      : SetAsDateTime(Value);
     varOleStr    : SetAsString(Value);
     varDispatch  : begin
-                     if TryVarAsType(Value,varInt64) then SetAsInt64(Value)
-                     else if TryVarAsType(Value,varDouble) then SetAsExtended(Value)
-                     else if TryVarAsType(Value,varBoolean) then SetAsBoolean(Value)
+                     if TryStrToInt64(Value,i) then SetAsInt64(i)
+                     else if TryStrToFloat(Value,f) then SetAsExtended(f)
+                     else if TryStrToBool(Value,b) then SetAsBoolean(b)
                      else if TryVarAsType(Value,varString) then SetAsString(Value)
                      else
                      begin

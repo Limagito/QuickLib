@@ -7,7 +7,7 @@
   Author      : Kike Pérez
   Version     : 1.9
   Created     : 14/07/2017
-  Modified    : 16/01/2020
+  Modified    : 02/05/2020
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -93,9 +93,9 @@ const
 type
   TPasswordComplexity = set of (pfIncludeNumbers,pfIncludeSigns);
 
-  {$IFDEF MSWINDOWS}
   TEnvironmentPath = record
     EXEPATH : string;
+    {$IFDEF MSWINDOWS}
     WINDOWS : string;
     SYSTEM : string;
     PROGRAMFILES : string;
@@ -112,8 +112,8 @@ type
     APPDATA : String;
     PROGRAMDATA : string;
     ALLUSERSPROFILE : string;
+    {$ENDIF MSWINDOWS}
   end;
-  {$ENDIF MSWINDOWS}
 
   {$IFNDEF FPC}
   TFileHelper = record helper for TFile
@@ -170,14 +170,24 @@ type
   end;
 
   {$IFNDEF FPC}
+
+  {$IFNDEF DELPHIXE7_UP}
+  TArrayUtil<T> = class
+    class procedure Delete(var aArray : TArray<T>; aIndex : Integer);
+  end;
+  {$ENDIF}
+
   TArrayOfStringHelper = record helper for TArray<string>
   public
+    function Any : Boolean; overload;
+    function Any(const aValue : string) : Boolean; overload;
     function Add(const aValue : string) : Integer;
     function AddIfNotExists(const aValue : string; aCaseSense : Boolean = False) : Integer;
     function Remove(const aValue : string) : Boolean;
     function Exists(const aValue : string) : Boolean;
     function Count : Integer;
   end;
+  TDelegate<T> = reference to procedure(Value : T);
   {$ENDIF}
 
   TPairItem = record
@@ -213,6 +223,7 @@ type
     property Items[const aName : string] : string read GetValue write AddOrUpdate;
     function ToArray : TArray<TPairItem>;
     procedure FromArray(aValue : TArray<TPairItem>);
+    procedure Clear;
   end;
 
   EEnvironmentPath = class(Exception);
@@ -230,9 +241,9 @@ type
   function WindowsToUnixPath(const WindowsPath: string): string;
   //corrects malformed urls
   function CorrectURLPath(cUrl : string) : string;
-  {$IFDEF MSWINDOWS}
   //get typical environment paths as temp, desktop, etc
   procedure GetEnvironmentPaths;
+  {$IFDEF MSWINDOWS}
   function GetSpecialFolderPath(folderID : Integer) : string;
   //checks if running on a 64bit OS
   function Is64bitOS : Boolean;
@@ -339,6 +350,8 @@ type
   function CommaText(aList : TStringList) : string; overload;
   //returns a real comma separated text from array of string
   function CommaText(aArray : TArray<string>) : string; overload;
+  //returns a string CRLF from array of string
+  function ArrayToString(aArray : TArray<string>) : string;
   //converts TStrings to array
   function StringsToArray(aStrings : TStrings) : TArray<string>;
   {$IFDEF MSWINDOWS}
@@ -360,11 +373,17 @@ type
   //get double quoted or dequoted string
   function DbQuotedStr(const str : string): string;
   function UnDbQuotedStr(const str: string) : string;
+  //get simple quoted or dequoted string
+  function SpQuotedStr(const str : string): string;
+  function UnSpQuotedStr(const str : string): string;
+  //ternary operator
+  function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : string) : string; overload;
+  function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : Integer) : Integer; overload;
+  function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : Extended) : Extended; overload;
+  function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : TObject) : TObject; overload;
 
-{$IFDEF MSWINDOWS}
 var
   path : TEnvironmentPath;
-{$ENDIF}
 
 implementation
 
@@ -529,11 +548,11 @@ begin
   //TNetEncoding.Url.Encode()
 end;
 
-{$IFDEF MSWINDOWS}
 procedure GetEnvironmentPaths;
 begin
   //gets path
   path.EXEPATH := TPath.GetDirectoryName(ParamStr(0));
+  {$IFDEF MSWINDOWS}
   path.WINDOWS := SysUtils.GetEnvironmentVariable('windir');
   path.PROGRAMFILES := SysUtils.GetEnvironmentVariable('ProgramFiles');
   path.COMMONFILES := SysUtils.GetEnvironmentVariable('CommonProgramFiles(x86)');
@@ -556,8 +575,10 @@ begin
   except
     //
   end;
+  {$ENDIF}
 end;
 
+{$IFDEF MSWINDOWS}
 function GetSpecialFolderPath(folderID : Integer) : string;
 var
   ppidl: PItemIdList;
@@ -595,9 +616,13 @@ function HasConsoleOutput : Boolean;
   var
     stout : THandle;
   begin
-    stout := GetStdHandle(Std_Output_Handle);
-    Win32Check(stout <> Invalid_Handle_Value);
-    Result := stout <> 0;
+    try
+      stout := GetStdHandle(Std_Output_Handle);
+      Win32Check(stout <> Invalid_Handle_Value);
+      Result := stout <> 0;
+    except
+      Result := False;
+    end;
   end;
 {$ELSE}
   begin
@@ -1461,6 +1486,24 @@ begin
   end;
 end;
 
+function ArrayToString(aArray : TArray<string>) : string;
+var
+  value : string;
+  sb : TStringBuilder;
+begin
+  if High(aArray) < 0 then Exit;
+  sb := TStringBuilder.Create;
+  try
+    for value in aArray do
+    begin
+      sb.Append(value);
+      sb.Append(#10#13);
+    end;
+  finally
+    sb.Free;
+  end;
+end;
+
 function StringsToArray(aStrings : TStrings) : TArray<string>;
 var
   i : Integer;
@@ -1535,6 +1578,16 @@ end;
 { TArrayOfStringHelper}
 
 {$IFNDEF FPC}
+function TArrayOfStringHelper.Any : Boolean;
+begin
+  Result := High(Self) >= 0;
+end;
+
+function TArrayOfStringHelper.Any(const aValue : string) : Boolean;
+begin
+  Result := Exists(aValue);
+end;
+
 function TArrayOfStringHelper.Add(const aValue : string) : Integer;
 begin
   SetLength(Self,Length(Self)+1);
@@ -1545,25 +1598,20 @@ end;
 function TArrayOfStringHelper.AddIfNotExists(const aValue : string; aCaseSense : Boolean = False) : Integer;
 var
   i : Integer;
-  found : Boolean;
 begin
-  found := False;
   for i := Low(Self) to High(Self) do
   begin
-    if aCaseSense then found := Self[i] = aValue
+    if aCaseSense then
+    begin
+      if Self[i] = aValue then Exit(i);
+    end
     else
     begin
-      found := CompareText(Self[i],aValue) = 0;
-      Exit(i)
+      if CompareText(Self[i],aValue) = 0 then Exit(i)
     end;
   end;
-  if not found then
-  begin
-    //if not exists add it
-    i := Self.Add(aValue);
-    Exit(i);
-  end;
-  Result := -1;
+  //if not exists add it
+  Result := Self.Add(aValue);
 end;
 
 function TArrayOfStringHelper.Remove(const aValue : string) : Boolean;
@@ -1574,7 +1622,11 @@ begin
   begin
     if CompareText(Self[i],aValue) = 0 then
     begin
+      {$IFDEF DELPHIXE7_UP}
       System.Delete(Self,i,1);
+      {$ELSE}
+      TArrayUtil<string>.Delete(Self,i);
+      {$ENDIF}
       Exit(True);
     end;
   end;
@@ -1689,7 +1741,11 @@ begin
   begin
     if CompareText(fItems[i].Name,aName) = 0 then
     begin
+      {$IF Defined(DELPHIXE7_UP) OR Defined(FPC)}
       System.Delete(fItems,i,1);
+      {$ELSE}
+      TArrayUtil<TPairItem>.Delete(fItems,i);
+      {$ENDIF}
       Exit(True);
     end;
   end;
@@ -1704,6 +1760,11 @@ end;
 procedure TPairList.FromArray(aValue : TArray<TPairItem>);
 begin
   fItems := aValue;
+end;
+
+procedure TPairList.Clear;
+begin
+  SetLength(fItems,0);
 end;
 
 { TPairList.TPairEnumerator}
@@ -1798,7 +1859,58 @@ begin
   end;
 end;
 
-{$IFDEF MSWINDOWS}
+function SpQuotedStr(const str : string): string;
+begin
+  Result := '''' + str + '''';
+end;
+
+function UnSpQuotedStr(const str: string) : string;
+begin
+  Result := Trim(str);
+  if not Result.IsEmpty then
+  begin
+    if Result.StartsWith('''') then Result := Copy(Result, 2, Result.Length - 2);
+  end;
+end;
+
+function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : string) : string;
+begin
+  if aCondition then Result := aIfIsTrue else Result := aIfIsFalse;
+end;
+
+function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : Integer) : Integer;
+begin
+  if aCondition then Result := aIfIsTrue else Result := aIfIsFalse;
+end;
+
+function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : Extended) : Extended;
+begin
+  if aCondition then Result := aIfIsTrue else Result := aIfIsFalse;
+end;
+
+function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : TObject) : TObject;
+begin
+  if aCondition then Result := aIfIsTrue else Result := aIfIsFalse;
+end;
+
+{$IFNDEF FPC}
+  {$IFNDEF DELPHIXE7_UP}
+  class procedure TArrayUtil<T>.Delete(var aArray : TArray<T>; aIndex : Integer);
+  var
+    n : Integer;
+    len : Integer;
+  begin
+    len := Length(aArray);
+    if (len > 0) and (aIndex < len) then
+    begin
+      for n := aIndex + 1 to len - 1 do aArray[n - 1] := aArray[n];
+      SetLength(aArray, len - 1);
+    end;
+  end;
+  {$ENDIF}
+{$ENDIF}
+
+{$IFNDEF NEXTGEN}
 initialization
   try
     GetEnvironmentPaths;
@@ -1817,4 +1929,5 @@ initialization
 {$ENDIF}
 
 end.
+
 

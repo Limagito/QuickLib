@@ -1,13 +1,13 @@
 { ***************************************************************************
 
-  Copyright (c) 2016-2019 Kike Pérez
+  Copyright (c) 2016-2020 Kike Pérez
 
   Unit        : Quick.HttpServer.Types
   Description : Http Server Types
   Author      : Kike Pérez
   Version     : 1.8
   Created     : 30/08/2019
-  Modified    : 17/10/2019
+  Modified    : 26/03/2020
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -43,7 +43,7 @@ type
   private
     fCallerClass : TClass;
   public
-    constructor Create(aCaller : TObject; aMessage : string);
+    constructor Create(aCaller : TObject; const aMessage : string);
     property CallerClass : TClass read fCallerClass write fCallerClass;
   end;
 
@@ -541,16 +541,21 @@ begin
 end;
 
 function TMIMETypes.GetFileMIMEType(const aFilename: string): string;
+var
+  fname : string;
 begin
-  if not fMIMEList.TryGetValue(ExtractFileExt(aFilename),Result) then Result := 'text/html';
+  fname := ExtractFileExt(aFilename);
+  //remove queries
+  if fname.Contains('?') then fname := Copy(fname,1,fname.IndexOf('?'));
+  if not fMIMEList.TryGetValue(fname,Result) then Result := 'text/html';
 end;
 
 { EControlledException }
 
-constructor EControlledException.Create(aCaller: TObject; aMessage: string);
+constructor EControlledException.Create(aCaller: TObject; const aMessage: string);
 begin
   inherited Create(aMessage);
-  fCallerClass := aCaller.ClassType;
+  if aCaller <> nil then fCallerClass := aCaller.ClassType;
 end;
 
 initialization

@@ -1,13 +1,13 @@
 { ***************************************************************************
 
-  Copyright (c) 2016-2019 Kike Pérez
+  Copyright (c) 2016-2020 Kike Pérez
 
   Unit        : Quick.RTTI.Utils
   Description : Files functions
   Author      : Kike Pérez
   Version     : 1.4
   Created     : 09/03/2018
-  Modified    : 29/10/2019
+  Modified    : 03/04/2020
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -36,12 +36,12 @@ interface
 uses
   SysUtils,
   Quick.Commons,
-  {$IFDEF FPC}
   TypInfo,
-  {$ENDIF}
   Rtti;
 
 type
+
+  TRttiPropertyOrder = (roFirstBase, roFirstInherited);
 
   TRTTI = class
   private class var
@@ -56,10 +56,14 @@ type
     class function GetFieldValue(aInstance : TObject; const aFieldName : string) : TValue; overload;
     class function GetFieldValue(aTypeInfo : Pointer; const aFieldName: string) : TValue; overload;
     {$ENDIF}
+    class function GetProperties(aType : TRttiType; aOrder : TRttiPropertyOrder = roFirstBase) : TArray<TRttiProperty>;
     class function GetType(aTypeInfo : Pointer) : TRttiType;
     class function GetProperty(aInstance : TObject; const aPropertyName : string) : TRttiProperty; overload;
     class function GetProperty(aTypeInfo : Pointer; const aPropertyName : string) : TRttiProperty; overload;
     class function GetPropertyPath(aInstance : TObject; const aPropertyPath : string) : TRttiProperty;
+    {$IFNDEF FPC}
+    class function GetMemberPath(aInstance: TObject; const aPropertyPath: string): TRttiMember;
+    {$ENDIF}
     class function PathExists(aInstance: TObject; const aPropertyPath: string) : Boolean;
     class function GetPathValue(aInstance : TObject; const aPropertyPath : string) : TValue;
     class procedure SetPathValue(aInstance: TObject; const aPropertyPath: string; aValue : TValue);
@@ -67,6 +71,7 @@ type
     class function PropertyExists(aTypeInfo : Pointer; const aPropertyName : string) : Boolean;
     class function GetPropertyValue(aInstance : TObject; const aPropertyName : string) : TValue; overload;
     class function GetPropertyValue(aTypeInfo : Pointer; const aPropertyName : string) : TValue; overload;
+    class function GetPropertyValueEx(aInstance: TObject; const aPropertyName: string): TValue;
     {$IFNDEF FPC}
     class function FindClass(const aClassName: string): TClass;
     class function CreateInstance<T>: T;
@@ -74,6 +79,11 @@ type
   end;
 
   ERTTIError = class(Exception);
+
+  TArrayHelper<T> = class
+  public
+    class function Concat(const Args: array of TArray<T>): TArray<T>; static;
+  end;
 
 implementation
 
@@ -122,6 +132,7 @@ class function TRTTI.GetField(aInstance: TObject; const aFieldName: string): TRt
 var
   rtype : TRttiType;
 begin
+  Result := nil;
   rtype := fCtx.GetType(aInstance.ClassInfo);
   if rtype <> nil then
   begin
@@ -133,6 +144,7 @@ class function TRTTI.GetField(aTypeInfo: Pointer; const aFieldName: string): TRt
 var
   rtype : TRttiType;
 begin
+  Result := nil;
   rtype := fCtx.GetType(aTypeInfo);
   if rtype <> nil then
   begin
@@ -161,14 +173,90 @@ class function TRTTI.GetProperty(aInstance: TObject; const aPropertyName: string
 var
   rtype : TRttiType;
 begin
+  Result := nil;
   rtype := fCtx.GetType(aInstance.ClassInfo);
   if rtype <> nil then Result := rtype.GetProperty(aPropertyName);
+end;
+
+class function TArrayHelper<T>.Concat(const Args: array of TArray<T>): TArray<T>;
+var
+  i, j, out, len: Integer;
+begin
+  len := 0;
+  for i := 0 to High(Args) do
+    len := len + Length(Args[i]);
+  SetLength(Result, len);
+  out := 0;
+  for i := 0 to High(Args) do
+    for j := 0 to High(Args[i]) do
+    begin
+      Result[out] := Args[i][j];
+      Inc(out);
+    end;
+end;
+
+class function TRTTI.GetProperties(aType: TRttiType; aOrder: TRttiPropertyOrder = roFirstBase): TArray<TRttiProperty>;
+var
+  flat: TArray<TArray<TRttiProperty>>;
+  t: TRttiType;
+  depth: Integer;
+begin
+  if aOrder = TRttiPropertyOrder.roFirstBase then
+  begin
+    t := aType;
+    depth := 0;
+    while t <> nil do
+    begin
+      Inc(depth);
+      t := t.BaseType;
+    end;
+
+    SetLength(flat, depth);
+    t := aType;
+    while t <> nil do
+    begin
+      Dec(depth);
+      {$IFNDEF FPC}
+      flat[depth] := t.GetDeclaredProperties;
+      {$ELSE}
+      flat[depth] := t.GetProperties;
+      {$ENDIF}
+      t := t.BaseType;
+    end;
+  end
+  else
+  begin
+    t := aType;
+    depth := 0;
+    while t <> nil do
+    begin
+      Inc(depth);
+      t := t.BaseType;
+    end;
+
+    SetLength(flat, depth);
+    t := aType;
+    depth := 0;
+    while t <> nil do
+    begin
+      {$IFNDEF FPC}
+      flat[depth] := t.GetDeclaredProperties;
+      {$ELSE}
+      flat[depth] := t.GetProperties;
+      {$ENDIF}
+      Inc(depth);
+      t := t.BaseType;
+    end;
+  end;
+
+  Result := TArrayHelper<TRttiProperty>.Concat(flat);
 end;
 
 class function TRTTI.GetProperty(aTypeInfo: Pointer; const aPropertyName: string): TRttiProperty;
 var
   rtype : TRttiType;
 begin
+  Result := nil;
   rtype := fCtx.GetType(aTypeInfo);
   if rtype <> nil then  Result := rtype.GetProperty(aPropertyName);
 end;
@@ -184,9 +272,11 @@ var
   {$IFNDEF FPC}
   rfield : TRttiField;
   {$ENDIF}
+  lastsegment : Boolean;
 begin
   Result := nil;
   proppath := aPropertyPath;
+  lastsegment := False;
   rtype := fCtx.GetType(aInstance.ClassType);
   repeat
     i := proppath.IndexOf('.');
@@ -195,7 +285,11 @@ begin
       propname := Copy(proppath,1,i);
       Delete(proppath,1,i+1);
     end
-    else propname := proppath;
+    else
+    begin
+      propname := proppath;
+      lastsegment := True;
+    end;
     if rtype.TypeKind = TTypeKind.tkRecord then
     begin
       {$IFNDEF FPC}
@@ -209,13 +303,76 @@ begin
     begin
       prop := rtype.GetProperty(propname);
       if prop = nil then Exit;
-      value := prop.GetValue(aInstance);
+      if lastsegment then Exit(prop)
+        else value := prop.GetValue(aInstance);
     end;
-    if value.Kind = TTypeKind.tkClass then rType := fCtx.GetType(value.AsObject.ClassType)
-      else if value.Kind = TTypeKind.tkRecord then rtype := fCtx.GetType(value.TypeInfo);
-  until i < 0;
-  Result := prop;
+    if not lastsegment then
+    begin
+      if value.Kind = TTypeKind.tkClass then rType := fCtx.GetType(value.AsObject.ClassType)
+        else if value.Kind = TTypeKind.tkRecord then rtype := fCtx.GetType(value.TypeInfo);
+    end;
+  until lastsegment;
+  Result := nil;
 end;
+
+{$IFNDEF FPC}
+class function TRTTI.GetMemberPath(aInstance: TObject; const aPropertyPath: string): TRttiMember;
+var
+  prop : TRttiProperty;
+  proppath : string;
+  propname : string;
+  i : Integer;
+  value : TValue;
+  rtype : TRttiType;
+  {$IFNDEF FPC}
+  rfield : TRttiField;
+  {$ENDIF}
+  lastsegment : Boolean;
+begin
+  Result := nil;
+  proppath := aPropertyPath;
+  lastsegment := False;
+  rtype := fCtx.GetType(aInstance.ClassType);
+  repeat
+    i := proppath.IndexOf('.');
+    if i > -1 then
+    begin
+      propname := Copy(proppath,1,i);
+      Delete(proppath,1,i+1);
+    end
+    else
+    begin
+      propname := proppath;
+      lastsegment := True;
+    end;
+    if rtype.TypeKind = TTypeKind.tkRecord then
+    begin
+      {$IFNDEF FPC}
+      rfield := rtype.GetField(propname);
+      if rfield <> nil then
+      begin
+        if lastsegment then Exit(rfield)
+          else value := rfield.GetValue(value.GetReferenceToRawData);
+      end;
+      {$ELSE}
+      raise ERTTIError.Create('FPC not supports record fields in RTTI');
+      {$ENDIF}
+    end
+    else
+    begin
+      prop := rtype.GetProperty(propname);
+      if prop = nil then Exit;
+      if lastsegment then Exit(prop)
+        else value := prop.GetValue(aInstance);
+    end;
+    if not lastsegment then
+    begin
+      if value.Kind = TTypeKind.tkClass then rType := fCtx.GetType(value.AsObject.ClassType)
+        else if value.Kind = TTypeKind.tkRecord then rtype := fCtx.GetType(value.TypeInfo);
+    end;
+  until lastsegment;
+end;
+{$ENDIF}
 
 class function TRTTI.PathExists(aInstance: TObject; const aPropertyPath: string) : Boolean;
 var
@@ -230,7 +387,7 @@ var
   {$ENDIF}
   lastsegment : Boolean;
 begin
-  if not Assigned(aInstance) then Exit;
+  if not Assigned(aInstance) then Exit(False);
   lastsegment := False;
   proppath := aPropertyPath;
   rtype := fCtx.GetType(aInstance.ClassType);
@@ -327,15 +484,15 @@ begin
     begin
       rprop := rtype.GetProperty(propname);
       if rprop = nil then raise ERTTIError.CreateFmt('Property "%s" not found in object',[propname])
-        {$IFNDEF FPC}
-        else value := rprop.GetValue(aInstance);
-        {$ELSE}
-        else
-        begin
-          if rprop.PropertyType.IsInstance then value := GetObjectProp(value.AsObject,propname)
-             else value := rprop.GetValue(value.AsObject);
-        end;
-        {$ENDIF}
+      {$IFNDEF FPC}
+      else value := rprop.GetValue(aInstance);
+      {$ELSE}
+      else
+      begin
+        if rprop.PropertyType.IsInstance then value := GetObjectProp(value.AsObject,propname)
+           else value := rprop.GetValue(value.AsObject);
+      end;
+      {$ENDIF}
     end;
     if not lastsegment then
     begin
@@ -439,6 +596,49 @@ begin
   end;
 end;
 
+class function TRTTI.GetPropertyValueEx(aInstance: TObject; const aPropertyName: string): TValue;
+var
+  pinfo : PPropInfo;
+begin
+  Result := nil;
+  pinfo := GetPropInfo(aInstance,aPropertyName);
+  if pinfo = nil then
+  begin
+    //if not found can be a public property
+    Result := GetPropertyValue(aInstance,aPropertyName);
+    Exit;
+  end;
+  case pinfo.PropType^.Kind of
+    tkInteger : Result := GetOrdProp(aInstance,pinfo);
+    tkInt64 : Result := GetInt64Prop(aInstance,aPropertyName);
+    tkFloat : Result := GetFloatProp(aInstance,aPropertyName);
+    tkChar : Result := Char(GetOrdProp(aInstance,aPropertyName));
+    {$IFDEF FPC}
+    tkWString : Result := GetWideStrProp(aInstance,aPropertyName);
+    tkSString,
+    tkAString,
+    {$ELSE}
+    tkUString,
+    tkWString,
+    {$ENDIF}
+    tkLString : Result := GetStrProp(aInstance,pinfo);
+    {$IFDEF FPC}
+    tkEnumeration :Result  := GetOrdProp(aInstance,aPropertyName);
+    {$ELSE}
+    tkEnumeration : Result := GetOrdProp(aInstance,aPropertyName);
+    {$ENDIF}
+    tkSet : Result := GetSetProp(aInstance,pinfo,True);
+    {$IFNDEF FPC}
+    tkClass :
+    {$ELSE}
+    tkBool : Result := Boolean(GetOrdProp(aInstance,pinfo));
+    tkObject :
+    {$ENDIF} Result := GetObjectProp(aInstance,pinfo);
+    tkDynArray : Result := GetDynArrayProp(aInstance,pinfo);
+  end;
+end;
+
+
 class function TRTTI.GetType(aTypeInfo: Pointer): TRttiType;
 begin
   Result := fCtx.GetType(aTypeInfo);
@@ -448,6 +648,7 @@ class function TRTTI.PropertyExists(aTypeInfo: Pointer; const aPropertyName: str
 var
   rtype : TRttiType;
 begin
+  Result := False;
   rtype := fCtx.GetType(aTypeInfo);
   if rtype <> nil then Result := rtype.GetProperty(aPropertyName) <> nil;
 end;
